@@ -1,0 +1,128 @@
+---
+title: "Group Project 1"
+author: "Hans Helmrich Laura"
+date: "2024-10-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Group: Hans Helmrich, Jacob Amspaugh, Joshua Lee Baker, Sivana Elli Hamond, Tucker William Reinhard
+
+# Schedule
+- Week 0: Clean Data, Understand Data, Identify Problem
+  
+- Week 1: Clustering Model - Segmentation - Effective
+  
+- Week 2: Predictive Modeling
+  
+- Week 3: Integrate, Final Recommendation -> Report
+
+# Initial Profitability
+
+### Information:
+
+- Avg training Cost per associate-> 1000$ 
+- Avg retention rate per associate -> 1000 calls 
+
+- Avg training cost per associate per call -> `r 1000/1000`$ 
+- Var Cost per call -> 1$ 
+- Total Cost per call-> 2$ 
+- Contribution Margin per successful call -> 10$  (Is this Revenue - Var cost or Just revenue) 
+
+- Success rate -> 9% \n
+- Total Calls -> 41188 \n
+
+## Calculation:
+```{r}
+Calls <- 41188
+successRate <- .09
+totalRevenuePerCall <- 10
+totalCostPerCall <- 2
+totalCost <- Calls * totalCostPerCall
+totalRevenue <- Calls * totalRevenuePerCall
+successRevenue <- (successRate * totalRevenue)
+currentProfitability <- successRevenue - totalCost
+```
+From what we found our current profitability is `r format(currentProfitability, scientific=FALSE)`$
+
+
+# Breakeven success rate
+```{r}
+breakevenSuccessRate <- totalCost/totalRevenue
+
+# This is used as a check (should be 0)
+(totalRevenue * breakevenSuccessRate) - (totalCost)
+```
+The success rate needed to breakeven is `r breakevenSuccessRate * 100`%
+
+# Get Data
+```{r}
+teleData <- read.csv("tele.csv")
+```
+
+# Summary and structure
+```{r}
+summary(teleData)
+```
+
+```{r}
+str(teleData)
+```
+
+# Clean Data
+Check if Data has any missing values
+```{r}
+sum(is.na(teleData))
+```
+
+Delete non-necessary columns
+```{r}
+teleData$X <- NULL
+teleData$duration <- NULL
+```
+
+Change variables to factor if they need be and to dummies if they have two options only
+```{r}
+## As factors
+teleData$job <- as.factor(teleData$job)
+teleData$marital <- as.factor(teleData$marital)
+teleData$education <- as.factor(teleData$education)
+teleData$default <- as.factor(teleData$default)
+teleData$housing <- as.factor(teleData$housing)
+teleData$loan <- as.factor(teleData$loan)
+teleData$month <- as.factor(teleData$month)
+teleData$day_of_week <- as.factor(teleData$day_of_week)
+teleData$poutcome <- as.factor(teleData$poutcome)
+
+## Figure out what to do
+teleData$contact <- as.factor(teleData$contact)
+
+## Dummies
+teleData$y <- ifelse(teleData$y =="no", 0, 1)
+```
+
+
+Find out if it is worth it to split pdays into categories or just 0 and 1
+```{r}
+non999 <- sum(teleData$pdays<999)
+yes999 <- sum(teleData$pdays==999)
+total <- nrow(teleData)
+```
+
+Split into 0 and 1
+```{r}
+teleData$pdays <- ifelse(teleData$pdays == 999, 0, 1)
+```
+
+Since we the percentage of non 999 rows to 999 rows is `r non999/yes999 * 100`% we decided to simply split into 1 and 0. 1 being you have been contacted and 0 you haven't been contacted.
+
+
+Check structure of data to make sure everything the cleaning worked
+```{r}
+str(teleData)
+summary(teleData)
+```
+
