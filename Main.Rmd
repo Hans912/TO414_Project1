@@ -104,6 +104,13 @@ teleData$contact <- as.factor(teleData$contact)
 teleData$y <- ifelse(teleData$y =="no", 0, 1)
 ```
 
+Balancing Data
+```{r}
+library(DMwR2)
+balanced_data <- SMOTE(y ~., data = teleData, perc.over = 100, perc.under = 200)
+table(balanced_data$y)
+#This code was added by Jacob
+```
 
 Find out if it is worth it to split pdays into categories or just 0 and 1
 ```{r}
