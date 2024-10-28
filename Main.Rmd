@@ -20,59 +20,25 @@ Group: Hans Helmrich, Jacob Amspaugh, Joshua Lee Baker, Sivana Elli Hamond, Tuck
   
 - Week 3: Integrate, Final Recommendation -> Report
 
-# Initial Profitability
-
-### Information:
-
-- Avg training Cost per associate-> 1000$ 
-- Avg retention rate per associate -> 1000 calls 
-
-- Avg training cost per associate per call -> `r 1000/1000`$ 
-- Var Cost per call -> 1$ 
-- Total Cost per call-> 2$ 
-- Contribution Margin per successful call -> 10$  (Is this Revenue - Var cost or Just revenue) 
-
-- Success rate -> 9% \n
-- Total Calls -> 41188 \n
-
-## Calculation:
+First lets load all the Libraries we will need
 ```{r}
-Calls <- 41188
-successRate <- .09
-totalRevenuePerCall <- 10
-totalCostPerCall <- 2
-totalCost <- Calls * totalCostPerCall
-totalRevenue <- Calls * totalRevenuePerCall
-successRevenue <- (successRate * totalRevenue)
-currentProfitability <- successRevenue - totalCost
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering visualization
+library(ggplot2)
 ```
-From what we found our current profitability is `r format(currentProfitability, scientific=FALSE)`$
 
-
-# Breakeven success rate
-```{r}
-breakevenSuccessRate <- totalCost/totalRevenue
-
-# This is used as a check (should be 0)
-(totalRevenue * breakevenSuccessRate) - (totalCost)
-```
-The success rate needed to breakeven is `r breakevenSuccessRate * 100`%
-
-# Get Data
+The first thing we want to do is get the data. Once this data has been imported, cleaned, and structured we will be able to use it to respond any questions we may have. 
+## Get Data
 ```{r}
 teleData <- read.csv("tele.csv")
 ```
 
-# Summary and structure
+## Summary and structure
 ```{r}
 summary(teleData)
-```
-
-```{r}
 str(teleData)
 ```
 
-# Clean Data
 Check if Data has any missing values
 ```{r}
 sum(is.na(teleData))
@@ -102,34 +68,226 @@ teleData$contact <- as.factor(teleData$contact)
 
 ## Dummies
 teleData$y <- ifelse(teleData$y =="no", 0, 1)
-```
 
-Balancing Data
-```{r}
-library(DMwR2)
-balanced_data <- SMOTE(y ~., data = teleData, perc.over = 100, perc.under = 200)
-table(balanced_data$y)
-#This code was added by Jacob
-```
-
-Find out if it is worth it to split pdays into categories or just 0 and 1
-```{r}
-non999 <- sum(teleData$pdays<999)
-yes999 <- sum(teleData$pdays==999)
-total <- nrow(teleData)
-```
-
-Split into 0 and 1
-```{r}
 teleData$pdays <- ifelse(teleData$pdays == 999, 0, 1)
+
+# Turn everything into dummy variables
+tele_Dummy <- as.data.frame(model.matrix(~ . -1, data = teleData))
+
+str(tele_Dummy)
+
+minmax <- function(x){
+  (x - min(x) / max(x) - min(x)) 
+}
+
+teleScaled <- as.data.frame(lapply(tele_Dummy, minmax)) 
+summary(teleScaled)
+
 ```
-
-Since we the percentage of non 999 rows to 999 rows is `r non999/yes999 * 100`% we decided to simply split into 1 and 0. 1 being you have been contacted and 0 you haven't been contacted.
-
 
 Check structure of data to make sure everything the cleaning worked
 ```{r}
-str(teleData)
-summary(teleData)
+str(teleScaled)
+summary(teleScaled)
 ```
+
+# Initial Profitability
+
+### Information:
+
+- Avg training Cost per associate-> 1000$ 
+- Avg retention rate per associate -> 1000 calls 
+
+- Avg training cost per associate per call -> `r 1000/1000`$ 
+- Var Cost per call -> 1$ 
+- Total Cost per call-> 2$ 
+- Contribution Margin per successful call -> 10$  (Is this Revenue - Var cost or Just revenue) 
+
+- Total Calls -> 41188 \n
+
+## Calculation:
+```{r}
+total_successes <- nrow(teleScaled[teleScaled$y == 1, ])
+Calls <- 41188
+successRate <- total_successes/Calls
+totalRevenuePerCall <- 10
+var_cost <- 1
+avg_train_cost <- 1000
+avg_retention <- 1000
+totalCostPerCall <- 1 + (avg_train_cost/avg_retention)
+totalCost <- Calls * totalCostPerCall
+totalRevenue <- (Calls * successRate) * totalRevenuePerCall
+currentProfitability <- totalRevenue - totalCost
+```
+From what we found our current profitability is `r format(currentProfitability, scientific=FALSE)`$
+
+
+# Breakeven success rate
+```{r}
+
+find_success <- function(successRate, Calls, totalRevenuePerCall, totalCostPerCall, avg_retention, avg_train_cost){
+                while ((((successRate * Calls) * totalRevenuePerCall)) - (totalCostPerCall * Calls) < 0){
+                  successRate <- successRate + .01
+                  avg_retention <- avg_retention + 100
+                  totalCostPerCall <- 1 + (avg_train_cost/avg_retention)
+                }
+                return(successRate)
+}
+
+new_rate <- find_success(successRate, Calls, totalRevenuePerCall, totalCostPerCall, avg_retention, avg_train_cost)
+```
+The success rate needed to break even is `r breakevenSuccessRate * 100`%
+
+
+# Clustering
+
+The first thing we have to do in Clustering, once our data is cleaned, is figuring out how many clusters we want to use. This might be the most important part of clustering, since a different k may mean completely different results. For this reason we decided to run all three of the WSS, Silhouette and Gap statistics and use the most common # of clusters. Since the dumified data set is very large we have decided to take a random sample of it and use that for wss and for gap_stat. The silhoutte method works quite fast even with such a large data set so we keep the dumified + scaled data set (without the y). When it comes to the random sample of the data set we are shooting for 20% since it takes a reasonable time for wss and Gap statistics to run. We will be using this as a guideline of how many clusters to use but it won't be final.
+
+Random sample
+```{r}
+set.seed(123)
+
+teleCluster <- teleScaled[,-54]
+
+n_rows <- nrow(teleCluster)
+sample_size <- round(0.20 * n_rows)  
+
+# Randomly sample row indices
+sample_indices <- sample(1:n_rows, sample_size)
+
+# Create a new data frame with the selected rows
+cluster_sample <- teleCluster[sample_indices, , drop=F]
+
+row.names(cluster_sample) <- NULL
+```
+
+
+## WSS (Within Clusters Sum of Squares):
+```{r}
+mem.maxVSize(vsize = 35000)
+fviz_nbclust(cluster_sample, kmeans, method = "wss")
+```
+
+```{r}
+fviz_nbclust(cluster_sample, kmeans, method = "gap_stat")
+```
+
+
+```{r}
+fviz_nbclust(teleCluster, kmeans, method = "silhouette")
+```
+
+
+## Clustering
+```{r}
+set.seed(123)
+km <- kmeans(teleCluster, 3)
+
+teleCluster$cluster <- km$cluster
+
+teleData$cluster <- km$cluster
+
+teleScaled$cluster <- km$cluster
+
+fviz_cluster(km, data = teleCluster, geom = "point", show.clust.cent = F)
+```
+
+```{r}
+fviz_cluster(km, data = teleCluster, ellipse = TRUE, ellipse.type = "t", ellipse.level = 0.95, ellipse.alpha = 0.2, show.clust.cent = F)
+```
+
+Now we can see which cluster has the highest y on average. This can help us figure out which cluster is more likely to buy and which cluster we should target. As seen below, the second cluster seems to have the highest y
+```{r}
+tapply(teleData$y, teleData$cluster, mean)
+```
+
+## Find profitability for clusters
+
+Cluster 2 (supposedly best one)
+```{r}
+cluster_2_data <- teleScaled[teleScaled$cluster == 2, ]
+```
+
+Profitability Cluster 2
+```{r}
+clust_2_total_calls <- nrow(cluster_2_data)
+cluster_2_successes <- nrow(cluster_2_data[cluster_2_data$y == 1, ])
+cluster_2_failure <- nrow(cluster_2_data[cluster_2_data$y == 0, ])
+cluster_2_success_rate <- cluster_2_successes/clust_2_total_calls
+
+cluster_2_rev <- cluster_2_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+cluster_2_success_diff <- cluster_2_success_rate - successRate
+
+cluster_2_avg_retention <- ((cluster_2_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+
+cluster_2_total_cost <- (1 + (avg_train_cost/cluster_2_avg_retention))*clust_2_total_calls
+
+cluster_2_prof <- cluster_2_rev - cluster_2_total_cost
+
+cluster_2_prof
+```
+
+Cluster 3 (second best)
+```{r}
+cluster_3_data <- teleScaled[teleScaled$cluster == 3, ]
+```
+
+Profitability Cluster 3
+```{r}
+clust_3_total_calls <- nrow(cluster_3_data)
+cluster_3_successes <- nrow(cluster_3_data[cluster_3_data$y == 1, ])
+cluster_3_failure <- nrow(cluster_3_data[cluster_3_data$y == 0, ])
+cluster_3_success_rate <- cluster_3_successes/clust_3_total_calls
+
+cluster_3_rev <- cluster_3_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+cluster_3_success_diff <- cluster_3_success_rate - successRate
+
+cluster_3_avg_retention <- ((cluster_3_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+
+cluster_3_total_cost <- (1 + (avg_train_cost/cluster_3_avg_retention))*clust_3_total_calls
+
+cluster_3_prof <- cluster_3_rev - cluster_3_total_cost
+
+cluster_3_prof
+```
+
+Cluster 1 (supposedly the worst)
+```{r}
+cluster_1_data <- teleScaled[teleScaled$cluster == 1, ]
+```
+
+Profitability Cluster 1
+```{r}
+clust_1_total_calls <- nrow(cluster_1_data)
+cluster_1_successes <- nrow(cluster_1_data[cluster_1_data$y == 1, ])
+cluster_1_failure <- nrow(cluster_1_data[cluster_1_data$y == 0, ])
+cluster_1_success_rate <- cluster_1_successes/clust_1_total_calls
+
+cluster_1_rev <- cluster_1_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+cluster_1_success_diff <- cluster_1_success_rate - successRate
+
+cluster_1_avg_retention <- ((cluster_1_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+
+cluster_1_total_cost <- (1 + (avg_train_cost/cluster_1_avg_retention))*clust_1_total_calls
+
+cluster_1_prof <- cluster_1_rev - cluster_1_total_cost
+
+cluster_1_prof
+```
+
+
+
+# Conclusion Clustering
+As seen above clustering does seem to be efficient to some extent. Cluster 2, which had the highest average y, was indeed the only cluster that ended up being profitable with a success rate of `r cluster_2_success_rate * 100`% and a profitability of $`r cluster_2_prof`. Although, it is important to mention that even tho cluster 2 has the least amount of calls made, `r (clust_2_total_calls/Calls) *100`% of calls, it has `r (cluster_2_successes/total_successes)*100`% of the successful calls. This proves that the company is over calling a lot and it would be in their best interest to target those calls to people that fit into cluster 2 rather than calling as many people as possible.
+
+
+
+
+
+
+
+
 
