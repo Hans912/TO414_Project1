@@ -2,7 +2,12 @@
 title: "Group Project 1"
 author: "Hans Helmrich Laura"
 date: "2024-10-03"
-output: html_document
+output: 
+  html_document:
+    theme: yeti
+    toc: yes
+    toc_float: yes
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
@@ -11,46 +16,51 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Group: Hans Helmrich, Jacob Amspaugh, Joshua Lee Baker, Sivana Elli Hamond, Tucker William Reinhard
 
-# Schedule
-- Week 0: Clean Data, Understand Data, Identify Problem
-  
-- Week 1: Clustering Model - Segmentation - Effective
-  
-- Week 2: Predictive Modeling
-  
-- Week 3: Integrate, Final Recommendation -> Report
+# Introduction
 
-First lets load all the Libraries we will need
+We were brought in to improve call center performance and profitability for the tele company. The analysis was structured over four weeks, covering data cleaning, clustering for customer segmentation, predictive modeling, and final recommendations. Our first step began by reading the data and cleaning the data so we can analyze the profitability and set up our models for later. Cleaning included handling missing values, removing irrelevant columns, and factoring categorical variables. We then clustered and split our data set before setting up our models. Finally, we built all the models that we could use towards a final recommendation and conclusion.
+
+# Loading + Cleaning Data
+
+## Loading Libraries
+
+First, we begin by loading in all libraries we will be using. This is so we can use functions that are stored in the libraries to build our models later on.
 ```{r}
 library(cluster)    # clustering algorithms
 library(factoextra) # clustering visualization
 library(ggplot2)
+library(caret)
+library(class)
+library(neuralnet)
 ```
 
+## Load Data
+
 The first thing we want to do is get the data. Once this data has been imported, cleaned, and structured we will be able to use it to respond any questions we may have. 
-## Get Data
 ```{r}
 teleData <- read.csv("tele.csv")
 ```
 
-## Summary and structure
+## Analyze Data Structure 
+
+We want to check the structure and the summary to familiarize ourselves with the size, type, metrics, weaknesses, etc. of our data. With this information we will have a better idea of what cleaning needs to be done in the future. It also lets us know if we have any missing data.
 ```{r}
 summary(teleData)
 str(teleData)
 ```
 
-Check if Data has any missing values
-```{r}
-sum(is.na(teleData))
-```
+## Clean Data
 
-Delete non-necessary columns
+First, we will drop any unnecessary variables. We will drop the ‘duration’ variable since it is a post event variable and does not help us with analyzing the performance of the calls. We will also drop the ‘X’ variable because it is an index (a count of each row) that doesn't provide any predictive value for our analysis or modeling.
 ```{r}
 teleData$X <- NULL
 teleData$duration <- NULL
 ```
 
-Change variables to factor if they need be and to dummies if they have two options only
+
+For ANN, KNN, and clustering models, we will factor and dummy categorical data to convert it into a numeric format that these algorithms can process. We will also scale the data to ensure all features contribute equally, as these models are sensitive to feature magnitudes for distance-based calculations or gradient optimization.
+
+For logistic regression, we will factor and dummy the data to handle categorical variables, but we will not scale the data. Scaling is unnecessary since logistic regression focuses on the relationship between features and the log-odds of the target. In fact, scaling categorical variables could distort their meaning and bias the model’s coefficients, reducing interpretability. Additionally, since logistic regression models are not sensitive to feature magnitudes or distances, scaling provides no performance benefit.
 ```{r}
 ## As factors
 teleData$job <- as.factor(teleData$job)
@@ -62,8 +72,6 @@ teleData$loan <- as.factor(teleData$loan)
 teleData$month <- as.factor(teleData$month)
 teleData$day_of_week <- as.factor(teleData$day_of_week)
 teleData$poutcome <- as.factor(teleData$poutcome)
-
-## Figure out what to do
 teleData$contact <- as.factor(teleData$contact)
 
 ## Dummies
@@ -74,38 +82,27 @@ teleData$pdays <- ifelse(teleData$pdays == 999, 0, 1)
 # Turn everything into dummy variables
 tele_Dummy <- as.data.frame(model.matrix(~ . -1, data = teleData))
 
-str(tele_Dummy)
-
 minmax <- function(x){
   (x - min(x) / max(x) - min(x)) 
 }
 
 teleScaled <- as.data.frame(lapply(tele_Dummy, minmax)) 
-summary(teleScaled)
-
-```
-
-Check structure of data to make sure everything the cleaning worked
-```{r}
-str(teleScaled)
-summary(teleScaled)
 ```
 
 # Initial Profitability
 
-### Information:
+## Information
 
-- Avg training Cost per associate-> 1000$ 
+- Avg training Cost per associate -> 1000$ 
 - Avg retention rate per associate -> 1000 calls 
 
 - Avg training cost per associate per call -> `r 1000/1000`$ 
 - Var Cost per call -> 1$ 
 - Total Cost per call-> 2$ 
-- Contribution Margin per successful call -> 10$  (Is this Revenue - Var cost or Just revenue) 
-
+- Revenue per successful call -> 10$  (We understand this as revenue, meaning we have to subtract the cost from it IMPORTANT TO MENTION IN REPORT) 
 - Total Calls -> 41188 \n
 
-## Calculation:
+## Calculation
 ```{r}
 total_successes <- nrow(teleScaled[teleScaled$y == 1, ])
 Calls <- 41188
@@ -122,7 +119,7 @@ currentProfitability <- totalRevenue - totalCost
 From what we found our current profitability is `r format(currentProfitability, scientific=FALSE)`$
 
 
-# Breakeven success rate
+## Breakeven success rate
 ```{r}
 
 find_success <- function(successRate, Calls, totalRevenuePerCall, totalCostPerCall, avg_retention, avg_train_cost){
@@ -136,14 +133,21 @@ find_success <- function(successRate, Calls, totalRevenuePerCall, totalCostPerCa
 
 new_rate <- find_success(successRate, Calls, totalRevenuePerCall, totalCostPerCall, avg_retention, avg_train_cost)
 ```
-The success rate needed to break even is `r breakevenSuccessRate * 100`%
+The success rate needed to break even is `r new_rate * 100`%
 
 
 # Clustering
 
-The first thing we have to do in Clustering, once our data is cleaned, is figuring out how many clusters we want to use. This might be the most important part of clustering, since a different k may mean completely different results. For this reason we decided to run all three of the WSS, Silhouette and Gap statistics and use the most common # of clusters. Since the dumified data set is very large we have decided to take a random sample of it and use that for wss and for gap_stat. The silhoutte method works quite fast even with such a large data set so we keep the dumified + scaled data set (without the y). When it comes to the random sample of the data set we are shooting for 20% since it takes a reasonable time for wss and Gap statistics to run. We will be using this as a guideline of how many clusters to use but it won't be final.
+The first step in clustering, after cleaning the data, is determining the optimal number of clusters. This is a critical decision, as different values of k \n
 
-Random sample
+k can lead to significantly different outcomes. To ensure a robust choice, we will apply three methods: WSS (Within-Cluster Sum of Squares), Silhouette, and Gap Statistics, selecting the most frequently recommended number of clusters. \n
+
+Given the size of the dummified dataset, we will take a random sample for the WSS and Gap Statistics calculations to ensure computational efficiency. For the Silhouette method, which performs efficiently even with large datasets, we will use the full dummified and scaled dataset (excluding the target variable). For the random sample, we aim to use 20% of the data, as it provides a good balance between accuracy and reasonable runtime for the WSS and Gap Statistics. \n
+
+While these methods will guide our selection of the optimal number of clusters, the results will serve as a reference point rather than a definitive conclusion.
+
+## Random sample
+
 ```{r}
 set.seed(123)
 
@@ -163,131 +167,542 @@ row.names(cluster_sample) <- NULL
 
 
 ## WSS (Within Clusters Sum of Squares):
-```{r}
-mem.maxVSize(vsize = 35000)
+```{r,cache=TRUE}
 fviz_nbclust(cluster_sample, kmeans, method = "wss")
 ```
 
-```{r}
+## Gap Stat:
+```{r, cache=TRUE}
 fviz_nbclust(cluster_sample, kmeans, method = "gap_stat")
 ```
 
 
-```{r}
+## Silhouette:
+```{r, cache=TRUE}
 fviz_nbclust(teleCluster, kmeans, method = "silhouette")
 ```
 
 
-## Clustering
+The three methods suggest using between three and four clusters, but these results should be interpreted with caution. It is important to note that two of the methods—WSS and Gap Statistics—were based on only 20% of the dataset, which may limit the accuracy of their recommendations. \n
+
+To account for this potential limitation, we will build two clustering models: one using three clusters (as suggested by the three methods) and another with six clusters to explore how the results differ. This comparative approach will help us better understand the clustering structure and evaluate whether a higher number of clusters reveals more meaningful insights. 
+
+## Clustering with k=3
 ```{r}
 set.seed(123)
-km <- kmeans(teleCluster, 3)
+km3 <- kmeans(teleCluster, 3)
 
-teleCluster$cluster <- km$cluster
+teleCluster$cluster3 <- km3$cluster
 
-teleData$cluster <- km$cluster
+teleScaled$cluster3 <- km3$cluster
 
-teleScaled$cluster <- km$cluster
-
-fviz_cluster(km, data = teleCluster, geom = "point", show.clust.cent = F)
+fviz_cluster(km3, data = teleCluster, geom = "point", show.clust.cent = F)
 ```
+
+
+Now, we can analyze which cluster has the highest average value of y, helping us identify the cluster with the highest likelihood of conversion or purchase. This insight allows us to determine which cluster to prioritize for targeted efforts. Based on the results, Cluster 2 shows the highest average y, indicating that it may represent the group most likely to buy. Therefore, this cluster could be a key focus for targeted marketing or other strategic actions.
 
 ```{r}
-fviz_cluster(km, data = teleCluster, ellipse = TRUE, ellipse.type = "t", ellipse.level = 0.95, ellipse.alpha = 0.2, show.clust.cent = F)
+tapply(teleScaled$y, teleScaled$cluster3, mean)
 ```
 
-Now we can see which cluster has the highest y on average. This can help us figure out which cluster is more likely to buy and which cluster we should target. As seen below, the second cluster seems to have the highest y
+
+## Clustering with k=6
 ```{r}
-tapply(teleData$y, teleData$cluster, mean)
+set.seed(123)
+km6 <- kmeans(teleCluster, 6)
+
+teleCluster$cluster6 <- km6$cluster
+
+teleScaled$cluster6 <- km6$cluster
+
+fviz_cluster(km6, data = teleCluster, geom = "point", show.clust.cent = F)
 ```
+
+
+```{r}
+tapply(teleScaled$y, teleScaled$cluster6, mean)
+```
+
+
+Based on the results from both clustering models, it appears that using 6 clusters provides more insightful segmentation compared to 3 clusters. Clusters 2 and 6 are identical across both models and show the highest profitability potential, as indicated by their high average y values. However, the 3-cluster model fails to uncover any additional clusters with sufficiently high average y values to suggest potential profitability. \n
+
+In contrast, the 6-cluster model reveals Cluster 4, which also exhibits a promising average y, indicating it could be another profitable segment. Therefore, we have decided to focus on the results from the 6-cluster model and will further analyze Clusters 6 and 4, as they show the highest potential for profitability based on their average y values.
+
 
 ## Find profitability for clusters
 
-Cluster 2 (supposedly best one)
+### Profitability Cluster 6
+
+To perform a focused analysis on Cluster 6, we will create a separate data frame containing only the data points assigned to this cluster. This will allow us to conduct more detailed exploration and targeted analysis specific to this high-potential segment.
 ```{r}
-cluster_2_data <- teleScaled[teleScaled$cluster == 2, ]
+cluster_6_data <- teleScaled[teleScaled$cluster6 == 6, ]
 ```
 
-Profitability Cluster 2
+The next step involves calculating the new costs by updating the average retention rate, reflecting the improvement in the success rate observed from the clustering analysis. By factoring in this increase in retention, we will obtain a smaller training cost per call.
 ```{r}
-clust_2_total_calls <- nrow(cluster_2_data)
-cluster_2_successes <- nrow(cluster_2_data[cluster_2_data$y == 1, ])
-cluster_2_failure <- nrow(cluster_2_data[cluster_2_data$y == 0, ])
-cluster_2_success_rate <- cluster_2_successes/clust_2_total_calls
+clust_6_total_calls <- nrow(cluster_6_data)
+cluster_6_successes <- nrow(cluster_6_data[cluster_6_data$y == 1, ])
+cluster_6_failure <- nrow(cluster_6_data[cluster_6_data$y == 0, ])
+cluster_6_success_rate <- cluster_6_successes/clust_6_total_calls
 
-cluster_2_rev <- cluster_2_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+cluster_6_rev <- cluster_6_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
 
-cluster_2_success_diff <- cluster_2_success_rate - successRate
+cluster_6_success_diff <- cluster_6_success_rate - successRate
 
-cluster_2_avg_retention <- ((cluster_2_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+cluster_6_avg_retention <- ((cluster_6_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
 
-cluster_2_total_cost <- (1 + (avg_train_cost/cluster_2_avg_retention))*clust_2_total_calls
+cluster_6_total_cost <- (1 + (avg_train_cost/cluster_6_avg_retention))*clust_6_total_calls
 
-cluster_2_prof <- cluster_2_rev - cluster_2_total_cost
+cluster_6_prof <- cluster_6_rev - cluster_6_total_cost
+```
+Based on these calculations, we find that if we had targeted the customers in Cluster 6, the projected profit would have been $`r round(cluster_6_prof)`. This insight highlights the value of strategic segmentation, as focusing on high-potential clusters like Cluster 6 can optimize profitability and resource allocation.
 
-cluster_2_prof
+### Profitability Cluster 4
+
+Similarly to Cluster 6, our next step is to create a data frame containing only the customers from Cluster 4. This will allow us to analyze this cluster’s behavior and profitability potential in isolation.
+```{r}
+cluster_4_data <- teleScaled[teleScaled$cluster6 == 4, ]
 ```
 
-Cluster 3 (second best)
+Furthermore, we will need to recalculate the costs based on the updated average retention rate resulting from the improved success rate for Cluster 4. This step ensures that our financial projections remain accurate, reflecting the impact of higher retention on overall costs. With increased retention, training costs would reduce.
 ```{r}
-cluster_3_data <- teleScaled[teleScaled$cluster == 3, ]
+clust_4_total_calls <- nrow(cluster_4_data)
+cluster_4_successes <- nrow(cluster_4_data[cluster_4_data$y == 1, ])
+cluster_4_failure <- nrow(cluster_4_data[cluster_4_data$y == 0, ])
+cluster_4_success_rate <- cluster_4_successes/clust_4_total_calls
+
+cluster_4_rev <- cluster_4_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+cluster_4_success_diff <- cluster_4_success_rate - successRate
+
+cluster_4_avg_retention <- ((cluster_4_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+
+cluster_4_total_cost <- (1 + (avg_train_cost/cluster_4_avg_retention))*clust_4_total_calls
+
+cluster_4_prof <- cluster_4_rev - cluster_4_total_cost
 ```
 
-Profitability Cluster 3
+Based on these calculations, we find that if we had targeted the customers in Cluster 4, the projected profit would have been $`r round(cluster_4_prof)`. This reinforces the value of targeted segmentation, as focusing on high-performing clusters like Cluster 4 can enhance profitability and improve resource efficiency.
+
+
+## Profitability of doing both Clusters
+
+We will now explore the potential of combining Clusters 4 and 6 to determine if targeting both clusters together yields a higher profit compared to focusing on either cluster individually. The next step involves creating a data frame that includes all the customers from both Cluster 4 and Cluster 6 for further analysis.
 ```{r}
-clust_3_total_calls <- nrow(cluster_3_data)
-cluster_3_successes <- nrow(cluster_3_data[cluster_3_data$y == 1, ])
-cluster_3_failure <- nrow(cluster_3_data[cluster_3_data$y == 0, ])
-cluster_3_success_rate <- cluster_3_successes/clust_3_total_calls
-
-cluster_3_rev <- cluster_3_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
-
-cluster_3_success_diff <- cluster_3_success_rate - successRate
-
-cluster_3_avg_retention <- ((cluster_3_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
-
-cluster_3_total_cost <- (1 + (avg_train_cost/cluster_3_avg_retention))*clust_3_total_calls
-
-cluster_3_prof <- cluster_3_rev - cluster_3_total_cost
-
-cluster_3_prof
-```
-
-Cluster 1 (supposedly the worst)
-```{r}
-cluster_1_data <- teleScaled[teleScaled$cluster == 1, ]
-```
-
-Profitability Cluster 1
-```{r}
-clust_1_total_calls <- nrow(cluster_1_data)
-cluster_1_successes <- nrow(cluster_1_data[cluster_1_data$y == 1, ])
-cluster_1_failure <- nrow(cluster_1_data[cluster_1_data$y == 0, ])
-cluster_1_success_rate <- cluster_1_successes/clust_1_total_calls
-
-cluster_1_rev <- cluster_1_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
-
-cluster_1_success_diff <- cluster_1_success_rate - successRate
-
-cluster_1_avg_retention <- ((cluster_1_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
-
-cluster_1_total_cost <- (1 + (avg_train_cost/cluster_1_avg_retention))*clust_1_total_calls
-
-cluster_1_prof <- cluster_1_rev - cluster_1_total_cost
-
-cluster_1_prof
+cluster_combined <- teleScaled[teleScaled$cluster6 %in% c(4, 6), ]
 ```
 
 
+Now, we will calculate the updated costs based on the new success rate and the average retention rate for the combined data set of Clusters 4 and 6. 
+```{r}
+clust_comb_total_calls <- nrow(cluster_combined)
+cluster_comb_successes <- nrow(cluster_combined[cluster_combined$y == 1, ])
+cluster_comb_failure <- nrow(cluster_combined[cluster_combined$y == 0, ])
+cluster_comb_success_rate <- cluster_comb_successes/clust_comb_total_calls
 
-# Conclusion Clustering
-As seen above clustering does seem to be efficient to some extent. Cluster 2, which had the highest average y, was indeed the only cluster that ended up being profitable with a success rate of `r cluster_2_success_rate * 100`% and a profitability of $`r cluster_2_prof`. Although, it is important to mention that even tho cluster 2 has the least amount of calls made, `r (clust_2_total_calls/Calls) *100`% of calls, it has `r (cluster_2_successes/total_successes)*100`% of the successful calls. This proves that the company is over calling a lot and it would be in their best interest to target those calls to people that fit into cluster 2 rather than calling as many people as possible.
+cluster_comb_rev <- cluster_comb_successes * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+cluster_comb_success_diff <- cluster_comb_success_rate - successRate
+
+cluster_comb_avg_retention <- ((cluster_comb_success_diff * 100) * 100) + 1000 # We are converting to % first and then multiplying by 100 (increase in retention per 1% increase)
+
+cluster_comb_total_cost <- (1 + (avg_train_cost/cluster_comb_avg_retention))*clust_comb_total_calls
+
+cluster_comb_prof <- cluster_comb_rev - cluster_comb_total_cost
+```
+
+Based on these calculations, we find that targeting customers from both Cluster 4 and Cluster 6 would have resulted in a projected profit of $`r round(cluster_comb_prof)`. This demonstrates the advantage of combining high-performing clusters, as it enhances overall profitability while optimizing resource allocation. Leveraging multiple profitable segments allows for more robust targeting strategies and improved efficiency.
+
+## Conclusion Clustering
+
+In conclusion, our clustering analysis has revealed the importance of targeted segmentation in maximizing profitability. While both Cluster 4 and Cluster 6 individually demonstrated strong potential, combining them has proven to be the most profitable strategy. The combined model captures the strengths of both clusters, resulting in higher overall profitability and more efficient resource allocation. This approach underscores the value of leveraging multiple high-performing segments, as it allows for more strategic targeting and improved business outcomes.
+
+## Clustering Profitability vs Current Profitability
+
+```{r}
+cluster_current_prof <- data.frame(
+  Category = c("Current Profitability", "Clusters Combined"),
+  Profitability = c(round(currentProfitability), round(cluster_comb_prof))  # Replace with real values
+)
+
+p <- ggplot(cluster_current_prof, aes(x = Category, y = Profitability, fill = Category)) +
+  geom_bar(stat = "identity", width = 0.6) +  # Bars based on raw values
+  geom_text(aes(label = Profitability), vjust = ifelse(cluster_current_prof$Profitability < 0, 1.5, -0.3), 
+            size = 5, color = "black") +  # Adjust label position based on sign
+  labs(
+    title = "Profitability Comparison: Current vs. Clusters Combined",
+    x = "Category",
+    y = "Profitability (in USD)"
+  ) +
+  theme_minimal(base_size = 15) +  # Clean, minimal theme
+  theme(legend.position = "none") +  # Remove legend
+  scale_y_continuous(limits = c(-40000, 30000), breaks = seq(-40000, 30000, by = 10000))  # Adjust y-axis
+
+# Display the graph
+print(p)
+```
 
 
 
+# Supervised Models
 
 
+## Clean Data (delete cluster columns)
+
+We are eliminating the clustering columns introduced to teleScaled in Part 2 to ensure they do not adversely impact the performance and accuracy of the supervised models.
+```{r}
+teleScaled <- subset(teleScaled, select = -c(cluster3, cluster6))
+row.names(teleScaled) <- NULL
+```
+
+## Random Oversampling
+
+We intend to apply random oversampling due to the significant class imbalance in the target variable y, with the majority of instances corresponding to 0 (indicating that the person did not make a purchase). We anticipate that this imbalance could substantially affect the performance of our models, particularly the KNN and ANN models.
+
+### Oversampling for unscaled Data (tele_Dummy)
+
+In this step, we are performing oversampling on the tele_Dummy DataFrame, which represents the one-hot encoded (but not scaled) version of teleData.
+```{r}
+library(smotefamily)
+
+X <- tele_Dummy[, -54]  # Exclude the target column
+y <- tele_Dummy$y 
+
+oversample_result <- SMOTE(X, y, K = 8, dup_size = 4)
+
+X_resampled <- oversample_result$data[, -ncol(oversample_result$data)]
+y_resampled <- oversample_result$data[, ncol(oversample_result$data)]
+over_tele_Dummy <- data.frame(X_resampled, y = as.numeric(y_resampled))
+
+```
+
+### Oversamping for scaled Data (teleScaled)
+
+In this step, we are performing oversampling on the teleScaled DataFrame, which is the one-hot encoded and scaled version of teleData.
+```{r}
+library(smotefamily)
+
+X_scaled <- teleScaled[, -54]  # Exclude the target column
+y_scaled <- teleScaled$y 
+
+oversample_result_scaled <- SMOTE(X_scaled, y_scaled, K = 8, dup_size = 4)
+
+X_resampled_scaled <- oversample_result_scaled$data[, -ncol(oversample_result_scaled$data)]
+y_resampled_scaled <- oversample_result_scaled$data[, ncol(oversample_result_scaled$data)]
+over_tele_scaled <- data.frame(X_resampled_scaled, y = as.numeric(y_resampled_scaled))
+```
+
+## Split Data 
+
+The next step in our analysis involves splitting the dataset into training and testing sets. The training data is used to fit our models, while the test data serves to evaluate the models by comparing their predictions with actual outcomes. After splitting the data, we will proceed with building three models. \n
+
+We use a train-test split ratio of 0.65, as a medium-high training ratio helps mitigate the risk of overfitting. For the KNN and ANN models, we apply scaling to both the training and testing sets following the split to ensure consistency and optimal model performance.
+
+### Splitting for Logistic Regression (not scaled)
+
+```{r}
+set.seed(1245)
+train_ratio <- .65
+train_rows <- sample(1:nrow(over_tele_Dummy), train_ratio*nrow(over_tele_Dummy))
+train_teleData_logi <- over_tele_Dummy[train_rows,]
+test_teleData_logi <- over_tele_Dummy[-train_rows,]
+
+row.names(train_teleData_logi) <- NULL
+row.names(test_teleData_logi) <- NULL
+
+summary(train_teleData_logi$y)
+summary(test_teleData_logi$y)
+```
+
+### Split Data for KNN and ANN (scaled)
+
+```{r}
+set.seed(1245)
+train_rows <- sample(1:nrow(over_tele_scaled), train_ratio*nrow(over_tele_scaled))
+train_teleData_scaled <- over_tele_scaled[train_rows,]
+test_teleData_scaled <- over_tele_scaled[-train_rows,]
+
+row.names(train_teleData_scaled) <- NULL
+row.names(test_teleData_scaled) <- NULL
+
+summary(train_teleData_scaled$y)
+summary(test_teleData_scaled$y)
+```
+
+## Build Models
+
+### Logistic Regression Models
+
+In this section, we are implementing and evaluating a Logistic Regression (LR) model, which is the simplest model in our analysis and will serve as a baseline for comparison with more complex models. Logistic Regression estimates the probability of a binary outcome—in this case, whether y=1 (the person made a purchase) or y=0 (the person did not make a purchase).
+
+We first fit a basic LR model using all available predictors. To improve the model, we apply backward stepwise selection, systematically removing non-significant predictors to optimize performance.
+
+Next, we generate predictions on the test data with both the initial and refined models. These predictions are in the form of probabilities, which we convert into binary outcomes (0 or 1) using a 0.5 threshold. Finally, we use confusion matrices to evaluate the accuracy of both models by comparing predicted outcomes against actual results. This baseline model will help us assess the performance of more advanced models, such as KNN and ANN, later in the analysis.
+
+```{r, cache=TRUE}
+# Simplest LR Model
+simple_LR <- glm(y ~ . , data = train_teleData_logi, family = "binomial")
+
+stepmodel_LR <- step(simple_LR, direction = "backward", trace = 0) 
+
+#### PREDICTIONS
+pred_Simp_LR <- predict(simple_LR, test_teleData_logi, type='response')
+pred_Simp_LR_bin <- ifelse(pred_Simp_LR <.5, 0, 1) 
+
+pred_LR <- predict(stepmodel_LR, test_teleData_logi, type='response')
+pred_LR_bin <- ifelse(pred_LR<.5, 0, 1)
+
+confusionMatrix(data = as.factor(test_teleData_logi$y), as.factor(pred_Simp_LR_bin), positive = "1")
+confusionMatrix(data = as.factor(test_teleData_logi$y), as.factor(pred_LR_bin), positive = "1")
+```
+
+### KNN Models
+
+In this section, we implement the K-Nearest Neighbors (KNN) algorithm to make predictions. KNN is a simple, non-parametric model that classifies observations based on the majority class among the k-nearest neighbors in the training data. In this case, we set k=12, meaning the prediction for each test observation is determined by the majority class among its 12 closest neighbors.
+
+We train the model using the scaled training data, excluding the target variable, and apply it to the scaled test data. The predictions are then compared to the actual outcomes using a confusion matrix to evaluate the model’s performance.
+
+This model will allow us to assess how well a distance-based, instance-level learning approach performs relative to our baseline Logistic Regression model.
+
+```{r, cache=TRUE}
+KNN_Pred <- knn(train = train_teleData_scaled[,-54], 
+    test = test_teleData_scaled[,-54], 
+    cl = train_teleData_scaled[,54],
+    k = 12) 
+
+confusionMatrix(as.factor(KNN_Pred), as.factor(test_teleData_scaled$y), positive = "1")
+```
+
+### ANN Models
 
 
+In this section, we implement an Artificial Neural Network (ANN) model to enhance our predictions. Although the data is already in DataFrame format, we convert it again to ensure compatibility with the neural network function, as it requires this structure to operate correctly.
+
+We configure the ANN with a hidden layer structure of 1 and 2 neurons. To ensure reproducibility, we set a random seed, and the training process uses a learning rate of 0.05 with a maximum step limit of 1 million iterations (stepmax).
+
+Once the model is trained, we generate predictions on the test data. The ANN outputs probabilities, which we convert into binary predictions using a threshold of 0.13. Finally, we evaluate the model’s performance using a confusion matrix, comparing the predicted classes with the actual outcomes.
+
+This ANN model introduces a more advanced, non-linear approach, providing deeper insights compared to the baseline Logistic Regression and the K-Nearest Neighbors models.
+
+```{r}
+train_tele_new <- data.frame(train_teleData_scaled)
+test_tele_new <- data.frame(test_teleData_scaled)
+```
+
+```{r, cache=TRUE}
+set.seed(123)
+ANN <- neuralnet(y ~ ., data = train_tele_new, hidden = c(1,2), stepmax = 1e6, lifesign = "none", learningrate = .05)
+plot(ANN)
+
+p1_ANN <- predict(ANN, newdata = test_tele_new)
+summary(p1_ANN)
+
+p1bin <- ifelse(p1_ANN > .13 ,1,0)
+confusionMatrix(as.factor(p1bin), as.factor(test_tele_new$y), positive="1")
+```
 
 
+## Evaluate and compare the three models
+
+Confusion Matrix of the Logistic Regression with a backward stepwise model:
+```{r}
+confusionMatrix(data = as.factor(test_teleData_logi$y), as.factor(pred_LR_bin), positive = "1")
+```
+
+Confusion Matrix of the KNN
+```{r}
+confusionMatrix(as.factor(KNN_Pred), as.factor(test_teleData_scaled$y), positive = "1")
+```
+
+Confusion Matrix of the ANN
+```{r}
+confusionMatrix(as.factor(p1bin),as.factor(test_tele_new$y),positive="1")
+```
+
+## Combine all models
+
+While some individual models perform quite well, we believe that combining the predictions from all three models will yield even better results. There are several approaches to ensemble learning—for example, we could use majority voting, where the most common prediction across the models is selected. However, we believe a more effective strategy is to build a meta-model.
+
+Specifically, we will use a simple Logistic Regression model, where the input features are the predictions from our Logistic Regression, K-Nearest Neighbors (KNN), and Artificial Neural Network (ANN) models. This ensemble approach leverages the strengths of each individual model, and we expect it to outperform any single model by capturing patterns that may have been missed by the others.
+```{r}
+pred_logistic <- as.numeric(pred_LR_bin)
+pred_knn <- as.numeric(KNN_Pred)
+pred_ann <- as.numeric(p1bin)
+
+# Create a new data frame with binary predictions as features
+stacked_data <- data.frame(
+  logistic = pred_logistic,
+  knn = pred_knn,
+  ann = pred_ann
+)
+
+# Train a meta-model (e.g., logistic regression) using the stacked predictions
+meta_model <- glm(test_tele_new$y ~ ., data = stacked_data, family = "binomial")
+
+# Generate final predictions from the meta-model
+final_prob <- predict(meta_model, stacked_data, type = "response")
+final_pred <- ifelse(final_prob > 0.5, 1, 0)
+
+# Evaluate the combined prediction
+confusionMatrix(factor(final_pred), factor(test_tele_new$y))
+```
+
+
+## Profitability for each model
+
+### Profitability Logistic Regression
+
+The first step in assessing profitability is to determine the success rate of our Logistic Regression model. This involves calculating the proportion of correct positive predictions (true positives) among all instances where the model predicted a positive outcome (1).
+
+To achieve this, we first count the total number of instances where the model predicted a 1. Then, we compute the success rate by dividing the number of true positives (actual 1s correctly predicted as 1) by the total number of positive predictions. This metric provides insight into the model's precision, helping us gauge how effectively it identifies successful outcomes.
+```{r}
+cm_lr <- confusionMatrix(data = as.factor(test_teleData_logi$y), as.factor(pred_LR_bin), positive = "1")
+lr_tp <- cm_lr$table[2, 2]
+lr_fn <- cm_lr$table[2, 1]
+lr_total_1 <- lr_tp + lr_fn
+lr_success <- lr_tp/lr_total_1
+```
+
+The success rate of our Logistic Regression model is `r lr_success * 100`%. With this information, the next step is to calculate the adjusted costs based on the improved average retention rate, which results in a reduction in the average training cost per call. Additionally, we need to determine the proportion of positive predictions (1s) the model makes relative to the total rows in the test set. This proportion will help us estimate the percentage of positive predictions across the entire dataset.
+
+Using this estimate, we can calculate the hypothetical total number of calls the model would make, which is crucial for determining overall revenue and total costs. Furthermore, we need to account for the improvement in the model’s success rate, as this increase enhances average retention, thereby lowering the average training cost per call and reducing overall costs.
+
+```{r}
+lr_1_perc <- lr_total_1/nrow(test_tele_new)
+
+lr_total_calls <- lr_1_perc*Calls
+  
+lr_rev <- (lr_total_calls * lr_success) * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+lr_success_diff <- lr_success - successRate # successRate found at the very beginning
+
+lr_avg_retention <- ((lr_success_diff * 100) * 100) + 1000 
+
+lr_total_cost <- (1 + (avg_train_cost/lr_avg_retention))*lr_total_calls
+
+lr_prof <- lr_rev - lr_total_cost
+```
+
+Based on the updated cost calculations, we find that our profit, if we had exclusively targeted customers using the Logistic Regression model, would be $`r format(round(lr_prof, 2), nsmall = 2, big.mark = ",")`. This figure significantly exceeds the profit we would have generated through a clustering-based approach, highlighting the effectiveness of leveraging the Logistic Regression model for customer targeting.
+
+
+### Profitability KNN
+
+We will take the same steps here as we did with our Logistic Regression.
+```{r}
+cm_knn <- confusionMatrix(as.factor(KNN_Pred), as.factor(test_teleData_scaled$y), positive = "1")
+knn_tp <- cm_knn$table[2, 2]
+knn_fn <- cm_knn$table[2, 1]
+knn_total_1 <- knn_tp + knn_fn
+knn_success <- knn_tp/knn_total_1
+```
+
+As expected, our KNN model performs better with a success rate of `r knn_success*100`%. As in the previous step, with this information we will calculate profitability based on the KNN model next.
+
+```{r}
+knn_1_perc <- knn_total_1/nrow(test_tele_new)
+
+knn_total_calls <- knn_1_perc*Calls
+  
+knn_rev <- (knn_total_calls * knn_success) * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+knn_success_diff <- knn_success - successRate # successRate found at the very beginning
+
+knn_avg_retention <- ((knn_success_diff * 100) * 100) + 1000 
+
+knn_total_cost <- (1 + (avg_train_cost/knn_avg_retention))*knn_total_calls
+
+knn_prof <- knn_rev - knn_total_cost
+```
+Based on the new costs, we find that our profit if we had only targeted customers based on the KNN would be $`r format(round(knn_prof, 2), nsmall = 2, big.mark = ",")`. Which exceeds both clustering and logistic regression.
+
+### Profitability ANN
+
+Similarly to the two previous models, the first thing we have to do is find the new success rate.
+```{r}
+cm_ann <- confusionMatrix(as.factor(p1bin),as.factor(test_tele_new$y),positive="1")
+ann_tp <- cm_ann$table[2, 2]
+ann_fn <- cm_ann$table[2, 1]
+ann_total_1 <- ann_tp + ann_fn
+ann_success <- ann_tp/ann_total_1
+```
+
+Surprisingly, the success rate of our ANN model is `r ann_success * 100`%, which is significantly lower than that of the other models. Given this result, our next step is to recalculate the total cost, factoring in the improved average retention rate. This improvement leads to a reduction in the average training cost per call, which will help us determine the overall profitability of the ANN model.
+```{r}
+ann_1_perc <- ann_total_1/nrow(test_tele_new)
+
+ann_total_calls <- ann_1_perc*Calls
+  
+ann_rev <- (ann_total_calls * ann_success) * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+ann_success_diff <- ann_success - successRate # successRate found at the very beginning
+
+ann_avg_retention <- ((ann_success_diff * 100) * 100) + 1000 
+
+ann_total_cost <- (1 + (avg_train_cost/ann_avg_retention))*ann_total_calls
+
+ann_prof <- ann_rev - ann_total_cost
+```
+
+
+Based on the updated cost calculations, we find that our profit, if we had exclusively targeted customers using the ANN model, would be $`r format(round(ann_prof, 2), nsmall = 2, big.mark = ",")`. This result is nearly as high as the profit achieved with the KNN model, demonstrating that success rate alone is not the sole determinant of profitability—the total number of calls made also plays a crucial role in driving overall profit.
+
+### Profitability Combined Models
+
+Similarly to all previous models, the first thing we have to do is find the new success rate.
+```{r}
+cm_all <- confusionMatrix(factor(final_pred), factor(test_tele_new$y))
+all_tp <- cm_all$table[2, 2]
+all_fn <- cm_all$table[2, 1]
+all_total_1 <- all_tp + all_fn
+all_success <- all_tp/all_total_1
+```
+
+The succes rate for the combined models would be `r all_success*100`%.
+```{r}
+all_1_perc <- all_total_1/nrow(test_tele_new)
+
+all_total_calls <- all_1_perc*Calls
+  
+all_rev <- (all_total_calls * all_success) * totalRevenuePerCall # Total Revenue Per call is found at the very beginning (10$)
+
+all_success_diff <- all_success - successRate # successRate found at the very beginning
+
+all_avg_retention <- ((all_success_diff * 100) * 100) + 1000 
+
+all_total_cost <- (1 + (avg_train_cost/all_avg_retention))*all_total_calls
+
+all_prof <- all_rev - all_total_cost
+```
+
+Based on the new costs, we find that our profit if we had only targeted customers based on the combined model would be $`r format(round(all_prof, 2), nsmall = 2, big.mark = ",")`. 
+
+## Models Profitability vs Current Profitability
+
+```{r}
+model_current_prof <- data.frame(
+  Category = c("Current Profitability", "Logistic Regression", "KNN", "ANN", "Combined"),
+  Profitability = c(round(currentProfitability), round(lr_prof), round(knn_prof), round(ann_prof),round(all_prof))  # Replace with real values
+)
+
+p <- ggplot(model_current_prof, aes(x = Category, y = Profitability, fill = Category)) +
+  geom_bar(stat = "identity", width = 0.6) +  # Bars based on raw values
+  geom_text(aes(label = Profitability), vjust = ifelse(model_current_prof$Profitability < 0, 1.5, -0.3), 
+            size = 5, color = "black") +  # Adjust label position based on sign
+  labs(
+    title = "Profitability Comparison: Current vs. Clusters Combined",
+    x = "Category",
+    y = "Profitability (in USD)"
+  ) +
+  theme_minimal(base_size = 15) +  # Clean, minimal theme
+  theme(legend.position = "none") +  # Remove legend
+  scale_y_continuous(limits = c(-40000, 200000), breaks = seq(-40000, 200000, by = 10000))  # Adjust y-axis
+
+# Display the graph
+print(p)
+```
+
+# Conclusion
+
+The K-Nearest Neighbors (KNN) model achieved the highest profitability compared to Logistic Regression, ANN, and the combined ensemble model. However, the superior performance of KNN may be due to overfitting, meaning it might be overly tailored to the current dataset and less effective with new, unseen data. Although the combined model generated slightly lower profits, it offers better generalization, making it more reliable for predicting customer behavior with future data. Therefore, we recommend the company adopt the combined model, as it is likely to provide more consistent and sustainable results over time.
